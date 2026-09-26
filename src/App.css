@@ -1,0 +1,30 @@
+.app {
+  height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 1.25rem;
+  flex-wrap: wrap;
+}
+
+.play-btn {
+  width: 96px;
+  height: 96px;
+  border-radius: 50%;
+  border: none;
+  background: #7dd3fc;
+  font-size: 1rem;
+  font-weight: 600;
+  line-height: 1;
+  cursor: pointer;
+  transition: transform 0.1s ease, background 0.15s ease;
+}
+
+.play-btn:hover {
+  background: #a5e3ff;
+  transform: scale(1.08);
+}
+
+.play-btn:active {
+  transform: scale(0.96);
+}
