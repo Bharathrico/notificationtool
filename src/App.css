@@ -1,30 +1,82 @@
 .app {
-  height: 100vh;
+  min-height: 100vh;
   display: flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 1.25rem;
-  flex-wrap: wrap;
+  gap: 1.5rem;
+  padding: 1rem;
+  box-sizing: border-box;
 }
 
-.play-btn {
-  width: 96px;
-  height: 96px;
-  border-radius: 50%;
+.controls {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  width: 100%;
+  max-width: 320px;
+}
+
+.controls label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  font-size: 0.9rem;
+}
+
+.controls select {
+  padding: 0.4rem;
+  background: #16181d;
+  color: inherit;
+  border: 1px solid #2a2d35;
+  border-radius: 6px;
+}
+
+.buttons {
+  display: flex;
+  gap: 0.75rem;
+}
+
+button {
+  flex: 1;
+  padding: 0.6rem 1rem;
   border: none;
+  border-radius: 8px;
   background: #7dd3fc;
-  font-size: 1rem;
+  color: #000;
   font-weight: 600;
-  line-height: 1;
   cursor: pointer;
-  transition: transform 0.1s ease, background 0.15s ease;
 }
 
-.play-btn:hover {
+button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+button:hover:not(:disabled) {
   background: #a5e3ff;
-  transform: scale(1.08);
 }
 
-.play-btn:active {
-  transform: scale(0.96);
+.saved {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  width: 100%;
+  max-width: 320px;
+}
+
+.saved button {
+  width: 100%;
+  background: #16181d;
+  color: inherit;
+  border: 1px solid #2a2d35;
+  font-weight: 400;
+}
+
+.saved button.editing {
+  border-color: #7dd3fc;
+  color: #7dd3fc;
 }
