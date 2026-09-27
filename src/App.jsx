@@ -1,5 +1,6 @@
 import { useRef, useState } from 'react'
 import { useSoundStore } from './store'
+import { saveSample, loadSample, deleteSamplesExcept } from './samples'
 import './App.css'
 
 const WAVEFORMS = ['sine', 'square', 'sawtooth', 'triangle']
@@ -7,8 +8,14 @@ const FILTERS = ['none', 'lowpass', 'highpass', 'bandpass', 'notch', 'peaking', 
 // gain in dB only applies to these filter types
 const GAIN_FILTERS = ['peaking', 'lowshelf', 'highshelf']
 
+// an uploaded sample plays at its original speed and pitch when frequency is set to this
+const SAMPLE_BASE_FREQUENCY = 440
+
 // sounds saved before filters existed lack the filter fields, so everything is merged over these
 const DEFAULTS = {
+  source: 'oscillator',
+  sampleId: null,
+  sampleName: '',
   waveform: 'sine',
   frequency: 440,
   gain: 0.25,
@@ -38,14 +45,20 @@ function App() {
   const [current, setCurrent] = useState(DEFAULTS)
   const [editingId, setEditingId] = useState(null)
   const { sounds, add, update, clear } = useSoundStore()
-  const { waveform, frequency, gain, duration, pan, filterType, filterFrequency, filterQ, filterGain,
+  const bufferCache = useRef(new Map())
+  const fileInputRef = useRef(null)
+  const { source, sampleId, sampleName, waveform, frequency, gain, duration, pan, filterType, filterFrequency, filterQ, filterGain,
     echoMix, echoTime, echoFeedback } = current
 
   // while a saved sound is selected, control changes are written straight back to it
-  const setField = (field, value) => {
-    setCurrent((c) => ({ ...c, [field]: value }))
-    if (editingId !== null) update(editingId, { [field]: value })
+  const setFields = (patch) => {
+    setCurrent((c) => ({ ...c, ...patch }))
+    if (editingId !== null) update(editingId, patch)
   }
+
+  const setField = (field, value) => setFields({ [field]: value })
+
+  const missingSample = source === 'sample' && !sampleId
 
   const selectSound = (sound) => {
     if (sound.id === editingId) {
@@ -61,6 +74,8 @@ function App() {
   const clearAll = () => {
     clear()
     setEditingId(null)
+    // saved sounds are gone, so only the file loaded in the controls is still needed
+    deleteSamplesExcept(sampleId ? [sampleId] : [])
   }
 
   const getContext = async () => {
@@ -71,12 +86,51 @@ function App() {
     return ctx
   }
 
-  const schedule = (ctx, saved, start) => {
+  const getBuffer = async (ctx, id) => {
+    if (!bufferCache.current.has(id)) {
+      const data = await loadSample(id)
+      if (!data) return null
+      // decodeAudioData detaches the buffer it's given, so decode a copy
+      bufferCache.current.set(id, await ctx.decodeAudioData(data.slice(0)))
+    }
+    return bufferCache.current.get(id)
+  }
+
+  // sounds using an uploaded file need its decoded buffer before they can be scheduled
+  const loadBuffers = (ctx, list) =>
+    Promise.all(list.map((s) => (s.source === 'sample' && s.sampleId ? getBuffer(ctx, s.sampleId) : null)))
+
+  const uploadSample = async (file) => {
+    if (!file) return
+    const ctx = await getContext()
+    const data = await file.arrayBuffer()
+    const id = crypto.randomUUID()
+    const buffer = await ctx.decodeAudioData(data.slice(0))
+    await saveSample(id, data)
+    bufferCache.current.set(id, buffer)
+    // start with the time limit covering the whole file, up to the slider's 3 s max
+    const length = buffer.duration / (frequency / SAMPLE_BASE_FREQUENCY)
+    setFields({
+      sampleId: id,
+      sampleName: file.name,
+      duration: Math.min(3, Math.max(0.05, Math.round(length * 20) / 20)),
+    })
+  }
+
+  const schedule = (ctx, saved, start, buffer) => {
     const sound = { ...DEFAULTS, ...saved }
-    const osc = ctx.createOscillator()
+    let osc
+    if (sound.source === 'sample') {
+      if (!buffer) return start
+      osc = ctx.createBufferSource()
+      osc.buffer = buffer
+      osc.playbackRate.value = sound.frequency / SAMPLE_BASE_FREQUENCY
+    } else {
+      osc = ctx.createOscillator()
+      osc.type = sound.waveform
+      osc.frequency.value = sound.frequency
+    }
     const env = ctx.createGain()
-    osc.type = sound.waveform
-    osc.frequency.value = sound.frequency
 
     const end = start + sound.duration
     env.gain.setValueAtTime(0, start)
@@ -123,7 +177,8 @@ function App() {
 
   const play = async (sound) => {
     const ctx = await getContext()
-    schedule(ctx, sound, ctx.currentTime)
+    const [buffer] = await loadBuffers(ctx, [sound])
+    schedule(ctx, sound, ctx.currentTime, buffer)
   }
 
   const playTrophy = async () => {
@@ -150,9 +205,10 @@ function App() {
 
   const playSequence = async () => {
     const ctx = await getContext()
+    const buffers = await loadBuffers(ctx, sounds)
     let t = ctx.currentTime
-    sounds.forEach((s) => {
-      t = schedule(ctx, s, t)
+    sounds.forEach((s, i) => {
+      t = schedule(ctx, s, t, buffers[i])
     })
   }
 
@@ -160,16 +216,39 @@ function App() {
     <div className="app">
       <div className="controls">
         <label>
-          Oscillation
-          <select value={waveform} onChange={(e) => setField('waveform', e.target.value)}>
-            {WAVEFORMS.map((w) => (
-              <option key={w} value={w}>{w}</option>
-            ))}
+          Source
+          <select value={source} onChange={(e) => setField('source', e.target.value)}>
+            <option value="oscillator">oscillator</option>
+            <option value="sample">uploaded audio</option>
           </select>
         </label>
 
+        {source === 'oscillator' ? (
+          <label>
+            Oscillation
+            <select value={waveform} onChange={(e) => setField('waveform', e.target.value)}>
+              {WAVEFORMS.map((w) => (
+                <option key={w} value={w}>{w}</option>
+              ))}
+            </select>
+          </label>
+        ) : (
+          <div className="upload">
+            <span>Audio file: {sampleName || 'none'}</span>
+            <button onClick={() => fileInputRef.current.click()}>
+              {sampleName ? 'Replace Audio' : 'Upload Audio'}
+            </button>
+            <input ref={fileInputRef} type="file" accept="audio/*" hidden
+              onChange={(e) => {
+                uploadSample(e.target.files[0])
+                e.target.value = '' // lets the same file be picked again
+              }} />
+          </div>
+        )}
+
         <label>
           Frequency: {frequency} Hz
+          {source === 'sample' && ` (${(frequency / SAMPLE_BASE_FREQUENCY).toFixed(2)}× speed)`}
           <input type="range" min="50" max="2000" step="1" value={frequency}
             onChange={(e) => setField('frequency', Number(e.target.value))} />
         </label>
@@ -248,9 +327,9 @@ function App() {
         )}
 
         <div className="buttons">
-          <button onClick={() => play(current)}>Test Sound</button>
+          <button onClick={() => play(current)} disabled={missingSample}>Test Sound</button>
           {editingId === null
-            ? <button onClick={() => add(current)}>Add</button>
+            ? <button onClick={() => add(current)} disabled={missingSample}>Add</button>
             : <button onClick={() => setEditingId(null)}>Done</button>}
         </div>
         <div className="buttons">
@@ -265,7 +344,7 @@ function App() {
           {sounds.map((s) => (
             <li key={s.id}>
               <button className={s.id === editingId ? 'editing' : ''} onClick={() => selectSound(s)}>
-                {s.waveform} · {s.frequency} Hz · {s.gain.toFixed(2)} · {s.duration.toFixed(2)}s
+                {s.source === 'sample' ? s.sampleName : s.waveform} · {s.frequency} Hz · {s.gain.toFixed(2)} · {s.duration.toFixed(2)}s
                 {s.pan ? ` · pan ${s.pan > 0 ? '+' : ''}${s.pan.toFixed(2)}` : ''}
                 {s.echoMix > 0 && ` · echo ${s.echoTime.toFixed(2)}s`}
                 {s.filterType && s.filterType !== 'none' && ` · ${s.filterType} ${s.filterFrequency} Hz`}
